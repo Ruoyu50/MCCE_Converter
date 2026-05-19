@@ -302,3 +302,94 @@ NetEase iPad 上的存档版本管理,**只能**通过外部完整目录快照�
 - iPad 在导出时是否强制 flush?(无 jailbreak 无法验证)
 - 网易是否改动了 LevelDB 默认参数?(可间接推断,无法直读)
 - (随实验追加)
+
+## 10. 未探的边界与可证伪假设
+
+v1 结论("减法回溯在 db/ 观察窗口内不可行")是在 4 个 snapshot 的
+基础上锁定的,锁定范围限于 db/ 目录内的 LevelDB 文件。db/ 之外的
+潜在信息源,以及 db/ 内未细查的副作用,都不在 v1 结论的覆盖范围内。
+
+下面列出已识别但未验证的边界,每条以"可证伪假设 + 测试方法 + 可能结果"
+形式给出。这些都是后续实验的候选,不是必做项。
+
+### 假设 A:iPad NetEase 客户端在 LevelDB 之外保留存档数据副本
+
+来源:NetEase 客户端可能为了同步 / 统计 / 崩溃恢复 / 成就上传等目的,
+在应用沙箱内保留 LevelDB 之外的额外文件,或在 iCloud 备份链路中
+留下完整或部分存档副本。
+
+测试方法:
+- 在 Mac 上做 iPad 的 iTunes/Finder 完整备份
+- 在备份目录中 grep `level.dat` 字节签名,或 chunk 数据典型模式
+- 检查 NetEase 应用沙箱(`AppDomain-com.netease.mc`)的所有文件,
+  排除 db/ 后看剩余部分
+
+可能结果:
+- 找到副本 → "回溯不可能"在此层面被推翻,需要重新评估
+- 没找到 → 这条边界被压实,v1 结论扩展到 iPad 文件系统层
+
+### 假设 B:LevelDB 中存在摘要式 key,包含跨时间的累积信息
+
+来源:Minecraft Bedrock 在 LevelDB 里可能写入了某些"统计型" key
+(例如玩家累积时间、chunk 修改计数、最近访问时间戳序列),
+这些 key 的值虽然被覆盖,但内部数据本身是历史信息的摘要。
+
+测试方法:
+- 用 amulet-leveldb 打开 snap_04 的 db/
+- 枚举所有 key,按命名空间分组
+- 重点检查名称包含 stat / history / log / tick / time / counter 的 key
+- 读其 value,看 NBT 结构里有没有跨时间累积的字段
+
+可能结果:
+- 找到摘要 key 且能解读 → 部分历史以"摘要"形式可读(不是 bit-level 回溯,
+  但能告诉你"这块 chunk 被修改了 N 次")
+- 没找到或字段不含历史 → 这条边界被压实
+
+### 假设 C:旧 MANIFEST 在磁盘上残留
+
+来源:LevelDB 启动时新建 MANIFEST,旧 MANIFEST 在 CURRENT 切换后
+理论上应被删除,但实际删除时机可能滞后,或在异常退出时未清理。
+如果旧 MANIFEST 残留,且其中引用的 ldb 文件也未被删除,理论上
+可以挂载到那个 MANIFEST 进入旧版本视图。
+
+测试方法:
+- 检查每个 snapshot 的 db/ 目录,看是否存在 MANIFEST 编号比 CURRENT
+  指向的更小的 MANIFEST 文件
+- 若有,读其内容(MANIFEST 是 LevelDB VersionEdit 的序列化,
+  amulet-leveldb 或自写 parser 可读)
+- 看其引用的 ldb 文件是否仍在磁盘上
+
+可能结果:
+- 残留 + 引用的 ldb 也存在 → 至少一步回溯在文件级可能
+- 残留但 ldb 不在 → 知道历史 metadata,拿不到数据
+- 没有残留 → 这条边界被压实
+
+### 假设 D:iPad 系统级快照(APFS snapshot / Time Machine 链路)
+包含历史存档
+
+来源:APFS 文件系统支持 snapshot,iOS 在系统更新等场景会创建 snapshot。
+如果存档数据被某个 APFS snapshot 捕获,理论上可以挂载该 snapshot
+读出当时的数据。
+
+测试方法:
+- 该测试需要 jailbreak 或开发者级 iPad 访问权限,普通用户不可执行
+- 暂列为"知道存在但不可测"
+
+可能结果:不适用(测试条件不具备)
+
+### 关于这些假设的态度
+
+这些假设按"可执行度 × 期望回报"排序:
+
+| 假设 | 可执行度 | 期望回报(救回溯的可能性) |
+|------|---------|-------------------------|
+| A    | 中(需 iPad 备份) | 低-中 |
+| B    | 高(已有工具) | 低 |
+| C    | 高(已有数据) | 极低(snap_00-04 看起来都只有 1 个 MANIFEST) |
+| D    | 极低 | 未知 |
+
+假设 C 可以**立即在现有 snapshot 上验证**——只需重新看一遍 inspect_db.py
+的输出,确认每个 snapshot 的 db/ 里 MANIFEST 文件数 = 1。已知答案是
+"= 1",所以 C 实际上已经被现有数据压实,可以在下次更新中合并进 v1 结论。
+
+假设 A 和 B 是真正未探的边界。
