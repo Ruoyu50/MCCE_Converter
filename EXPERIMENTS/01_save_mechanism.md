@@ -170,12 +170,41 @@ CURRENT 指向: <内容>
     - NetEase 客户端在世界打开期间有稳定的后台写入,与玩家操作无关
 - 异常或意外: 无
 
-
-
+### snap_03_one_block
+- 时间: 2026-05-19 HH:MM
+- iPad 动作: 进入 snap_02 世界,在出生点附近放 1 个圆石方块,立即退出
+- iPad 内消耗时间: <30 秒
+- 导出后目录大小: 48 KB
+- 导出后 db/ 内容:
+  CURRENT             16 bytes  sha256:e6325e36f681
+      → MANIFEST-000013
+  MANIFEST-000013    281 bytes  sha256:0fabdad57a29
+  000015.log       15122 bytes  sha256:acb9359760d8
+  000016.ldb        2703 bytes  sha256:1f18e9382b18
+  TOTAL            18122 bytes  (4 files)
+- 与 snap_02 对比:
+    - CURRENT: MANIFEST-000009 → MANIFEST-000013 (+4)
+    - MANIFEST 大小: 257 → 281 (+24)
+    - log: 000011.log (100037) → 000015.log (15122),编号 +4,
+      大小骤降(idle 时间短)
+    - ldb: 000012.ldb (2704) → 000016.ldb (2703),旧消失新出现,大小几乎相同,
+      sha256 完全不同
+    - 文件总数: 4 → 4
+- 解读:
+    - **第三个 snapshot 锁定模式**:每次进出世界后,LevelDB 总是回到
+      "1 个 log + 1 个 ldb + 1 个 MANIFEST + 1 个 CURRENT" 的形态
+    - 单方块改动在 ldb 字节数上不可见(2716→2704→2703,几乎不变),
+      但 sha256 每次都不同,内容确实变了
+    - 模式锁定:每次进出 = 强制 compaction,L0 永远只有 1 个 ldb,
+      标准 LSM 的 kL0_CompactionTrigger 行为在 NetEase iPad 上不存在
+- 异常或意外: 无
 
 ## 8. 当前结论(随实验推进重写,标注版本)
 
-(实验开始后在此填写)
+- NetEase iPad 在每次进出世界时强制 compaction,L0 永远是 1 个 ldb
+- "减法回溯"在 iPad 这条路上不可行(物理信息不在了)
+- 唯一可行的版本管理方案是外部完整目录快照(等价于 git 不增量、每次全量)
+- 2022 年那个老存档无法恢复到任何历史状态
 
 ## 9. 待解决的不确定性
 
