@@ -199,6 +199,37 @@ CURRENT 指向: <内容>
       标准 LSM 的 kL0_CompactionTrigger 行为在 NetEase iPad 上不存在
 - 异常或意外: 无
 
+### snap_04_big_chunk
+- 时间: 2026-05-19 HH:MM
+- iPad 动作: 进入 snap_03 世界,切创造飞行,沿 +X 方向飞 200 格,
+  放 16×16×16 圆石堆,立即退出
+- iPad 内消耗时间: ~3 分钟
+- 导出后目录大小: 244 KB
+- 导出后 db/ 内容:
+  CURRENT             16 bytes  sha256:7d3d7c3b6e16
+      → MANIFEST-000017
+  MANIFEST-000017   1063 bytes  sha256:f53195207c9f
+  000036.log      209349 bytes  sha256:cca9face2d47
+  000038.ldb        4212 bytes  sha256:5dcc3f045669
+  TOTAL           214640 bytes  (4 files)
+- 与 snap_03 对比:
+    - CURRENT: MANIFEST-000013 → MANIFEST-000017 (+4)
+    - MANIFEST 大小: 281 → 1063 (+782, 3.7×),记录了多次 VersionEdit
+    - log: 000015 → 000036,**编号跳 +21**(之前都是 +3 或 +4)
+    - log 大小: 15122 → 209349,反映退出时新 log 接收的少量写入
+    - ldb: 000016 (2703) → 000038 (4212),旧消失新出现,大小 +1509
+    - 文件总数: 4 → 4(仍然单 ldb!)
+- 解读:
+    - **形态不变**:大改动 + 200 格飞行后仍然回到"1 log + 1 ldb"标准形态
+    - **编号跳 +21 与 MANIFEST 大小翻倍是独立验证**:期间发生了 ~10 次
+      flush + ~10 次 compaction(每次写一条 VersionEdit,消耗若干编号)
+    - **推断 memtable 阈值远小于 LevelDB 默认 4 MB**:
+      总写入量估计几百 KB ~ 1-2 MB,但触发了 ~10 次 flush,
+      推断 NetEase 把 write_buffer_size 调到 ~64-128 KB(为 iPad 节省内存)
+    - **退出时强制完整 compaction**:无论中间 L0 累积到多少,
+      退出时都合并成单 ldb。这才是 NetEase 客户端真正非标准的行为
+- 异常或意外: 无
+
 ## 8. 当前结论(随实验推进重写,标注版本)
 
 - NetEase iPad 在每次进出世界时强制 compaction,L0 永远是 1 个 ldb
