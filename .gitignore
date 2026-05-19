@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Virtual environment
+.venv/
+venv/
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Claude session notes(README 提到过)
+.claude/
+
+# 测试与实验数据(任何 NetEase 存档导出 / Chunker 中间物 / Java 输出)
+*_decrypted/
+*_decrypted_netease/
+*_netease/
+*_java/
+
+# 实验 snapshot 目录(如果你按我建议的 snap_NN/ 命名)
+snap_*/
+EXPERIMENTS/data/
+
+# Chunker JAR(README 说放在 ~/.local/share/mcce/,不应该进仓库,但以防万一)
+chunker-cli-*.jar
+
+# 真实存档(base64 命名的 NetEase 导出目录,长这样:uya1ZzFiBwA=)
+# 这条规则比较松,可能误伤,慎用——更安全的做法是手动确认
+# */=*/

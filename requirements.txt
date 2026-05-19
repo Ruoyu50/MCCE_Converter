@@ -1,0 +1,17 @@
+# Optional dep for `mcce.py convert` and `patch_localplayer.py`.
+# Only the convert subcommand imports this lazily; `inspect` and `decrypt`
+# work with stdlib-only Python.
+#
+# macOS prereqs (system leveldb + snappy must be on the linker path):
+#   brew install leveldb snappy
+#
+# Setup:
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r requirements.txt
+#
+# Run:
+#   .venv/bin/python mcce.py convert <save> --seed <N>
+#
+# Note: plyvel (the other popular Python LevelDB binding) does NOT work on
+# Homebrew leveldb due to an RTTI mismatch on macOS — use amulet-leveldb.
+amulet-leveldb>=1.0,<2
