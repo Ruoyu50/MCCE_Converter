@@ -144,6 +144,34 @@ CURRENT 指向: <内容>
       (玩家位置时间戳 / tick 计数 / 客户端状态等)
 - 异常或意外: 无
 
+### snap_02_noop_5min
+- 时间: 2026-05-19 HH:MM
+- iPad 动作: 进入 snap_01 世界,不移动、不开背包、不开聊天框,等待约 5 分钟,
+  从游戏内退出按钮退出世界
+- iPad 内消耗时间: ~5 分钟
+- 导出后目录大小: 132 KB
+- 导出后 db/ 内容:
+  CURRENT             16 bytes  sha256:b3524365a633
+    → MANIFEST-000009
+  MANIFEST-000009    257 bytes  sha256:0dedf1dacea1
+  000011.log      100037 bytes  sha256:c93b14c8f8d8
+  000012.ldb        2704 bytes  sha256:2930fc65064d
+  TOTAL           103014 bytes  (4 files)
+- 与 snap_01 对比:
+    - CURRENT: MANIFEST-000006 → MANIFEST-000009 (+3)
+    - MANIFEST 大小: 104 → 257 (+153)
+    - log: 000008.log (20069) → 000011.log (100037),编号 +3,大小 ×5
+    - ldb: 000007.ldb (2716) → 000012.ldb (2704),**旧 ldb 消失,新 ldb 出现**
+    - 文件总数: 4 → 4 (不变)
+- 解读:
+    - **进出世界 = 一次完整的 LSM 重组**:旧 log flush + 旧 ldb 被合并 + 新 log + 新 ldb
+    - ldb 数量始终保持 1 个,文件名滚动变化。和标准 LSM "积累 L0 到阈值才 compaction" 不同
+    - 5 分钟 idle 期间 log 增长 ~80 KB,折算速率 ~270 bytes/秒,与 snap_01 的 ~300 bytes/秒 接近
+    - NetEase 客户端在世界打开期间有稳定的后台写入,与玩家操作无关
+- 异常或意外: 无
+
+
+
 
 ## 8. 当前结论(随实验推进重写,标注版本)
 
