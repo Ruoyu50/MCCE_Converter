@@ -108,14 +108,41 @@ CURRENT 指向: <内容>
       火焰蔓延/TNT 爆炸/重生方块爆炸/自然生命恢复/奖励箱/初始地图/命令方块:
       全部关闭
     - randomTickSpeed: 进入后命令设为 0
-- 导出后目录大小:  40K    snap_00_initial/
+- 导出后目录大小: 40K
 - 导出后 db/ 内容:
-  CURRENT                                16 bytes  sha256:0861415cada6
+  CURRENT             16 bytes  sha256:0861415cada6
       → MANIFEST-000004
-  MANIFEST-000004                        50 bytes  sha256:b51bc53f3c43
-  000005.log                          11243 bytes  sha256:70c5f5aa3373
-  TOTAL                               11309 bytes  (3 files)
+  MANIFEST-000004     50 bytes  sha256:b51bc53f3c43
+  000005.log       11243 bytes  sha256:70c5f5aa3373
+  TOTAL            11309 bytes  (3 files)
 
+### snap_01_noop_30s
+- 时间: 2026-05-19 HH:MM  (填实际时间)
+- iPad 动作: 进入 snap_00 世界,不移动、不开背包、不开聊天框,等待约 30 秒,从游戏内退出按钮退出世界
+- iPad 内消耗时间: ~30 秒
+- 导出后目录大小: 52 KB
+- 导出后 db/ 内容:
+  CURRENT             16 bytes  sha256:4166bf17b2da
+      → MANIFEST-000006
+  MANIFEST-000006    104 bytes  sha256:da5f20c4ab17
+  000008.log       20069 bytes  sha256:8ef1d9939f37
+  000007.ldb        2716 bytes  sha256:c9013fbe356b
+  TOTAL            22905 bytes  (4 files)
+- 与 snap_00 对比:
+    - CURRENT: MANIFEST-000004 → MANIFEST-000006 (+2)
+    - MANIFEST 大小: 50 → 104 (+54)
+    - log: 000005.log (11243) → 000008.log (20069),编号跳 3,大小 +8826
+    - **L0 出现第一个 SSTable**: 000007.ldb (2716 bytes)
+    - 文件总数: 3 → 4
+- 解读:
+    - 一次"进入 + 30 秒静止 + 退出"消耗了 3 个文件编号(6/7/8),
+      推测启动序列为:新 MANIFEST-000006 → 把旧 log 000005 flush 成
+      000007.ldb → 开新 log 000008 接收后续写入
+    - 关键发现:**NetEase 客户端退出世界时强制 flush**(或客户端启动时
+      把上一次的 .log 直接 flush 成 .ldb)。每次进出 = L0 多一个文件
+    - 30 秒"什么都不做"期间 log 仍增长 ~9 KB,说明 NetEase 有后台写入
+      (玩家位置时间戳 / tick 计数 / 客户端状态等)
+- 异常或意外: 无
 
 
 ## 8. 当前结论(随实验推进重写,标注版本)
