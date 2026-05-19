@@ -110,12 +110,13 @@ CURRENT 指向: <内容>
     - randomTickSpeed: 进入后命令设为 0
 - 导出后目录大小:  40K    snap_00_initial/
 - 导出后 db/ 内容:
-  000005.log                          11243 bytes  sha256:70c5f5aa3373
   CURRENT                                16 bytes  sha256:0861415cada6
       → MANIFEST-000004
   MANIFEST-000004                        50 bytes  sha256:b51bc53f3c43
+  000005.log                          11243 bytes  sha256:70c5f5aa3373
+  TOTAL                               11309 bytes  (3 files)
 
-  
+
 
 ## 8. 当前结论(随实验推进重写,标注版本)
 
