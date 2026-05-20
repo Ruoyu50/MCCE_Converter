@@ -197,23 +197,29 @@ cp -r /path/to/iPad_export_java ~/Library/Application\ Support/minecraft/saves/M
 - `--trailer-byte <0xNN>` — passed through to encrypt (default: `0x67`).
 - `--keep-intermediate` / `--no-keep-intermediate` — control whether `<save>_bedrock_intermediate/` survives after a successful encrypt. Default is **keep** (debug-friendly: re-run encrypt with different keystream/trailer without redoing the slow Chunker step).
 
-#### Player State: Mostly Restored (Inventory still WIP)
+#### Player State: Mostly Restored (Item NBT Conversion still WIP)
 
 Chunker's Java → Bedrock pass emits only a minimal player stub, so player state used to be lost entirely. The `--player-template` overlay (player_translate.py) now restores most of it. Status, verified on iPad NetEase 3.8.15 (Bedrock 1.21.90):
 
-**✓ Restored (Phase 1b + 2):**
+**✓ Restored (Phase 1b + 2 + 3a):**
 - **Player position** (Pos, with the Bedrock +1.62 eye-height offset) and **rotation**.
 - **Health** (written as the `minecraft:health` attribute, not the legacy top-level short).
 - **XP** (level + progress).
 - **Food** (hunger / saturation / exhaustion).
 - **Dimension** (overworld / nether / end).
+- **Inventory** items — id, count, and durability, rebuilt as Bedrock's fixed 36-slot list with slot order preserved.
+- **Armor + Offhand** equipment — Java's `equipment` compound mapped to Bedrock `Armor[0..3]` (head/chest/legs/feet) + `Offhand`.
 
-**✗ Still lost (Phase 3, WIP):**
-- **Inventory** items — empty (carries the template save's inventory instead).
-- **Armor + Offhand** equipment — same.
+**✗ Still lost (Phase 3b, WIP):**
+- **Enchantments** — Java enchanted gear comes through as the plain (un-enchanted) item (Java string enchant IDs ↔ Bedrock numeric IDs not yet mapped).
+- **Custom-named items** — anvil-renamed items show their default name (Java JSON text component ↔ Bedrock plain string not yet converted).
+- **ID-differing items** — the ~5% of items whose IDs differ between editions (`cobweb`/`web`, `lily_pad`/`waterlily`, etc.) may vanish or look wrong on iPad until the item-id overlay table lands.
 - **Ender Chest** contents.
 
-These need Java↔Bedrock item-id and enchantment-id mapping, which is the Phase 3 work.
+**⏳ Coming next (immediately after 3a):**
+- **SelectedInventorySlot** — the held hotbar slot is currently the template's, not the Java player's (`SelectedItemSlot`). Trivial pass-through, planned next.
+
+These remaining items need Java↔Bedrock item-id and enchantment-id mapping, which is the Phase 3b work.
 
 **Not overlaid by design:**
 - **Abilities** (walk/fly speed, fly mode, etc.) — kept from the template. For survival-mode players the template's abilities match; a creative-mode Java player would come through as the template's gamemode. Revisited only if it misbehaves.

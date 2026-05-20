@@ -18,15 +18,18 @@ So Phase 1b uses a *template overlay*: read a real NetEase save's
 Java-derived fields onto it. The result is a genuine NetEase player entity
 carrying the Java player's position/health.
 
-Phased rollout (this file is Phase 2):
+Phased rollout (this file is Phase 3a):
   Phase 1b (done): Pos, Rotation, Health — overlaid onto a template.
-  Phase 2 (now):   XP (level + progress), food (hunger/saturation/exhaustion),
+  Phase 2 (done):  XP (level + progress), food (hunger/saturation/exhaustion),
                    dimension. abilities deliberately NOT overlaid (researched —
                    the template's survival abilities matched the Java player's
                    on gameplay-relevant fields; the Java↔Bedrock field-name and
                    case differences make blind copying risky, revisit in 2.5 if
                    a creative-mode save misbehaves).
-  Phase 3 (later): equipment + inventory (needs Java↔Bedrock item-id mapping).
+  Phase 3a (now):  inventory + equipment, BASIC items only — id (pass-through),
+                   count, durability. New Java 1.20.5+ component format.
+  Phase 3b (later):enchantments (string→numeric ench), custom names, item-id
+                   override table for the ~dozens of genuinely-different ids.
 
 Ground-truth facts (confirmed by reading real NetEase iPad 3.8.15 /
 Bedrock 1.21.90 `~local_player` values from saves P, B-iPad, B-Desktop):
@@ -277,6 +280,131 @@ def _apply_dimension(java_player, bedrock_player) -> str | None:
     return f"Dimension {name!r} -> DimensionId = {mapping[name]}"
 
 
+# ---------------------------------------------------------------- items (Phase 3a)
+#
+# Ground truth from a real NetEase ~local_player (B template, Bedrock 1.21.90):
+#
+#   Inventory: ListTag, FIXED length 36, Slot 0..35 all present (0-8 hotbar,
+#     9-35 main). Each item has a `Slot` byte. Empty slot is a real item with
+#     Count=0 and Name="" (NOT absent):
+#       {Count:byte, Damage:short, Name:string, Slot:byte, WasPickedUp:byte, tag?:compound}
+#   Armor:   ListTag, FIXED length 4 = [head, chest, legs, feet]. Items here
+#     have NO Slot field (positional). Empty = {Count:0,Damage:0,Name:"",WasPickedUp:0}.
+#   Offhand: ListTag, FIXED length 1, no Slot field, same empty shape.
+#   Durability lives in the TOP-LEVEL `Damage` short (tools may also carry a
+#     tag.Damage, but top-level is what we set). Enchants/custom names live in
+#     `tag` — NOT handled here (Phase 3b).
+#
+# Java 1.20.5+ source format (New World 01 player file):
+#   Inventory[i] = {Slot:byte, id:string, count:int, components:compound}
+#   Armor is NOT in Inventory; it's a separate `equipment` compound:
+#     equipment = {head?, chest?, legs?, feet?, offhand?} (only filled slots present),
+#     each item = {id:string, count:int, components:compound} (no Slot).
+#   Durability is components["minecraft:damage"] (int).
+
+def _empty_bedrock_item(slot: int | None = None):
+    import amulet_nbt as anbt
+    it = anbt.CompoundTag()
+    it["Count"] = anbt.ByteTag(0)
+    it["Damage"] = anbt.ShortTag(0)
+    it["Name"] = anbt.StringTag("")
+    it["WasPickedUp"] = anbt.ByteTag(0)
+    if slot is not None:
+        it["Slot"] = anbt.ByteTag(slot)
+    return it
+
+
+def translate_item_java_to_bedrock(java_item, keep_slot: bool = True):
+    """Java 1.20.5+ component-format item → Bedrock item compound (or None for
+    air/empty/unconvertible). Phase 3a: id (pass-through) + count + durability.
+    Enchants / custom names / other components are deliberately ignored (3b)."""
+    import amulet_nbt as anbt
+    jid = java_item.get("id")
+    if jid is None:
+        return None
+    name = str(jid)
+    if name in ("", "minecraft:air"):
+        return None
+
+    out = anbt.CompoundTag()
+    out["Name"] = anbt.StringTag(name)          # pass-through; id-diff overrides are 3b
+    cnt = int(java_item.get("count", 1))
+    out["Count"] = anbt.ByteTag(max(0, min(127, cnt)))
+
+    dmg = 0
+    comps = java_item.get("components")
+    if comps is not None and hasattr(comps, "get"):
+        jd = comps.get("minecraft:damage")
+        if jd is not None:
+            try:
+                dmg = int(jd)
+            except (TypeError, ValueError):
+                dmg = 0
+    out["Damage"] = anbt.ShortTag(max(0, min(32767, dmg)))
+    out["WasPickedUp"] = anbt.ByteTag(0)
+
+    if keep_slot and "Slot" in java_item:
+        out["Slot"] = anbt.ByteTag(int(java_item["Slot"]))
+    return out
+
+
+def _apply_inventory(java_player, bedrock_player) -> str | None:
+    """Replace the template's 36-slot Inventory with the Java player's items.
+    Only main inventory slots 0..35 (new-format armor lives in `equipment`,
+    handled by _apply_equipment; legacy armor slots 100-103/150 are ignored
+    here — that's a Phase 3b concern)."""
+    import amulet_nbt as anbt
+    jinv = java_player.get("Inventory")
+    if jinv is None:
+        return None
+    slots = {i: _empty_bedrock_item(i) for i in range(36)}
+    n_items = 0
+    n_skipped = 0
+    for jit in jinv:
+        sl = jit.get("Slot")
+        if sl is None:
+            continue
+        s = int(sl)
+        if not (0 <= s <= 35):
+            continue  # legacy armor/offhand slot numbering — not handled in 3a
+        bit = translate_item_java_to_bedrock(jit, keep_slot=True)
+        if bit is None:
+            if str(jit.get("id", "")) not in ("", "minecraft:air"):
+                n_skipped += 1
+                print(f"    [player-translate] skipped unconvertible item in slot {s}: {jit.get('id')}")
+            continue
+        bit["Slot"] = anbt.ByteTag(s)
+        slots[s] = bit
+        n_items += 1
+    bedrock_player["Inventory"] = anbt.ListTag([slots[i] for i in range(36)])
+    return f"Inventory -> {n_items} items ({n_skipped} unknown skipped)"
+
+
+def _apply_equipment(java_player, bedrock_player) -> str | None:
+    """Java new-format `equipment` compound → Bedrock Armor[4] + Offhand[1].
+    Old-format saves (armor in Inventory, no `equipment`) are skipped (3b)."""
+    import amulet_nbt as anbt
+    jeq = java_player.get("equipment")
+    if jeq is None:
+        return None
+    n_armor = 0
+    armor = []
+    for slot in ("head", "chest", "legs", "feet"):   # Bedrock Armor index 0..3
+        jit = jeq.get(slot)
+        bit = translate_item_java_to_bedrock(jit, keep_slot=False) if jit is not None else None
+        if bit is None:
+            armor.append(_empty_bedrock_item())
+        else:
+            armor.append(bit)
+            n_armor += 1
+    bedrock_player["Armor"] = anbt.ListTag(armor)
+
+    joff = jeq.get("offhand")
+    boff = translate_item_java_to_bedrock(joff, keep_slot=False) if joff is not None else None
+    bedrock_player["Offhand"] = anbt.ListTag([boff if boff is not None else _empty_bedrock_item()])
+    return f"Equipment -> {n_armor} armor piece(s)" + (", offhand" if boff is not None else "")
+
+
 # ---------------------------------------------------------------- template loading
 
 def _read_local_player_value(db_dir: Path) -> bytes:
@@ -394,7 +522,8 @@ def translate_player_java_to_bedrock(
 
     applied = []
     for fn in (_apply_pos, _apply_rotation, _apply_health,
-               _apply_xp, _apply_food, _apply_dimension):
+               _apply_xp, _apply_food, _apply_dimension,
+               _apply_inventory, _apply_equipment):
         msg = fn(java_player, bedrock_player)
         if msg:
             applied.append(msg)
