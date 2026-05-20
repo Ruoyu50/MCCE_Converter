@@ -213,9 +213,9 @@ Chunker's Java → Bedrock pass emits only a minimal player stub, so player stat
 - **Enchantments** — Java string enchant IDs → Bedrock numeric `tag.ench` IDs (a ~41-entry table using Bedrock's own 0..37 scheme, e.g. sharpness=9). Enchanted gear and books carry their enchants and levels.
 - **Custom-named items** — anvil-renamed items: Java JSON text component → Bedrock `tag.display.Name` plain string.
 - **ID-differing items** — the handful of items whose IDs differ between editions (`cobweb`→`web`, `lily_pad`→`waterlily`) are remapped via a conservative override table; everything else passes through unchanged.
+- **Ender Chest** contents — uses the same translation pipeline as Inventory (`EnderItems` → `EnderChestInventory`, 27 slots), so enchants, custom names, and id overrides are preserved too.
 
 **Known limitations:**
-- **Ender Chest** contents — not copied.
 - **Player skin** — account-bound, not stored in the save; out of scope.
 - **Persistent potion/buff effects** — Bedrock doesn't persist `active_effects` in the player NBT the way Java does; out of scope.
 - **Fine-grained abilities** — abilities (walk/fly speed, fly mode, gamemode flags) are kept from the template. For survival players this is correct; a creative-mode Java save would come through as the template's (survival) gamemode.

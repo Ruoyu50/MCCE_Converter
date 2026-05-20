@@ -25,10 +25,12 @@ Phased rollout (this file is Phase 3b):
                    overlaid (researched — the template's survival abilities
                    matched the Java player's on gameplay-relevant fields).
   Phase 3a (done): inventory + equipment, BASIC items — id, count, durability.
-  Phase 3b (now):  enchantments (Java string → Bedrock numeric ench id),
+  Phase 3b (done): enchantments (Java string → Bedrock numeric ench id),
                    enchanted-book stored enchants, custom names (Java JSON text
                    → Bedrock tag.display.Name), item-id override table for the
                    handful of genuinely-different ids (cobweb/web, lily_pad/...).
+  Phase 3c (now):  ender chest (Java EnderItems → Bedrock EnderChestInventory,
+                   27 slots, reusing the item pipeline).
 
 Ground-truth facts (confirmed by reading real NetEase iPad 3.8.15 /
 Bedrock 1.21.90 `~local_player` values from saves P, B-iPad, B-Desktop):
@@ -529,6 +531,41 @@ def _apply_selected_slot(java_player, bedrock_player) -> str | None:
     return f"SelectedItemSlot {int(jsel)} -> SelectedInventorySlot = {s}"
 
 
+def _apply_ender_chest(java_player, bedrock_player) -> str | None:
+    """Java EnderItems → Bedrock EnderChestInventory (fixed 27 slots, Slot 0-26).
+    Same item pipeline as _apply_inventory (reuses translate_item_java_to_bedrock,
+    so enchants / custom names / id overrides apply for free), just 27 slots.
+
+    If the Java field is absent (old-format save), skip. If it's present but
+    empty, we still rebuild 27 empty slots so the Java state wins over whatever
+    the template's ender chest held."""
+    import amulet_nbt as anbt
+    jender = java_player.get("EnderItems")
+    if jender is None:
+        return None
+    slots = {i: _empty_bedrock_item(i) for i in range(27)}
+    n_items = 0
+    n_skipped = 0
+    for jit in jender:
+        sl = jit.get("Slot")
+        if sl is None:
+            continue
+        s = int(sl)
+        if not (0 <= s <= 26):
+            continue
+        bit = translate_item_java_to_bedrock(jit, keep_slot=True)
+        if bit is None:
+            if str(jit.get("id", "")) not in ("", "minecraft:air"):
+                n_skipped += 1
+                print(f"    [player-translate] skipped unconvertible ender-chest item in slot {s}: {jit.get('id')}")
+            continue
+        bit["Slot"] = anbt.ByteTag(s)
+        slots[s] = bit
+        n_items += 1
+    bedrock_player["EnderChestInventory"] = anbt.ListTag([slots[i] for i in range(27)])
+    return f"Ender Chest -> {n_items} items ({n_skipped} unknown skipped)"
+
+
 # ---------------------------------------------------------------- template loading
 
 def _read_local_player_value(db_dir: Path) -> bytes:
@@ -648,7 +685,7 @@ def translate_player_java_to_bedrock(
     for fn in (_apply_pos, _apply_rotation, _apply_health,
                _apply_xp, _apply_food, _apply_dimension,
                _apply_inventory, _apply_equipment,
-               _apply_selected_slot):
+               _apply_selected_slot, _apply_ender_chest):
         msg = fn(java_player, bedrock_player)
         if msg:
             applied.append(msg)
