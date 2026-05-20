@@ -94,7 +94,7 @@ Produces `some_bedrock_save_netease/` — a NetEase-format save that the iPad Ne
 #### When to Use
 
 - **Move a friend's NetEase save onto your iPad** — they export, you decrypt with their account's key, then re-encrypt with *your* account's key. (Different iPad accounts use different per-save XOR keys.)
-- **Round-trip a Java save back to iPad** — Chunker can convert Java → Bedrock; `encrypt` packages that Bedrock save for NetEase.
+- **Round-trip a Java save back to iPad** — Chunker can convert Java → Bedrock; `encrypt` packages that Bedrock save for NetEase. For the full one-shot pipeline use [`java-to-netease`](#java-to-netease--java-edition--netease-ipad-one-shot) instead of running these two steps by hand.
 - **Manually edit an iPad save** — decrypt, mess with NBT or chunks using standard Bedrock tools, re-encrypt, push back to iPad.
 - **Recover from an iPad save you've already exported and modified** — as long as you kept the standard-Bedrock intermediate, you can always rebuild the NetEase form.
 
@@ -151,6 +151,70 @@ A "manual decryption" that XOR-undoes the bytes but skips the 4-byte sentinel st
 So: always feed `encrypt` either `mcce.py decrypt`'s output, or a save that originated as standard Bedrock from the start (a Chunker Java→Bedrock conversion, an Amulet/MCEdit export, etc.). Don't feed it a custom-decrypted intermediate unless you know its `.ldb` files pass `idx_off + idx_sz + 5 + 48 == file_size`.
 
 **Requires .venv Python** (amulet-leveldb is needed to modify `~local_player`).
+
+### `java-to-netease` — Java Edition → NetEase iPad (One Shot)
+
+```bash
+.venv/bin/python mcce.py java-to-netease /path/to/your_java_save
+```
+
+Mirror of `convert` in the opposite direction. Internally runs Chunker (Java → standard Bedrock) and then the `encrypt` pipeline (Bedrock → NetEase) as one command. The intermediate Bedrock save is kept by default so you can inspect or re-run encryption with different flags without redoing Chunker.
+
+Outputs:
+- `your_java_save_bedrock_intermediate/` — Chunker's Bedrock output, kept by default for debugging.
+- `your_java_save_netease/` — NetEase-format save ready to push to iPad.
+
+#### When to Use
+
+- **Build a world in Java, play it on iPad.** Edit terrain or use Java-only mods, then port back to the NetEase client.
+- **Repair a NetEase save by round-tripping through Java.** If the NetEase save has issues a Bedrock-side tool can fix, this is the shortest path back to iPad.
+- **Migrate Java saves to NetEase as gifts/shares**, same caveat about per-account keystream as `encrypt`.
+
+#### Full Round-Trip Example (NetEase → Java → NetEase)
+
+```bash
+# 1. Pull off iPad and convert to Java.
+.venv/bin/python mcce.py convert /path/to/iPad_export
+# → /path/to/iPad_export_java/
+
+# 2. Edit / play in Java Edition. (Make a copy first if you care.)
+cp -r /path/to/iPad_export_java ~/Library/Application\ Support/minecraft/saves/MyEdit
+
+# 3. After editing, send back to iPad in one shot:
+.venv/bin/python mcce.py java-to-netease ~/Library/Application\ Support/minecraft/saves/MyEdit
+# → MyEdit_bedrock_intermediate/  (kept for debugging)
+# → MyEdit_netease/                (push to iPad)
+```
+
+#### Flags
+
+- `-o, --output <path>` — final NetEase output dir (default: `<save>_netease/`).
+- `--bedrock-intermediate <path>` — where Chunker's intermediate Bedrock save goes (default: `<save>_bedrock_intermediate/`).
+- `-f, --format <STRING>` — Chunker output format for the Bedrock intermediate (default: `BEDROCK_R21_90`, verified on iPad NetEase 3.8.15 / Bedrock 1.21.90). Override if Chunker rejects the default for your Bedrock target version.
+- `--keystream <8-char-or-16-hex>` — passed through to encrypt (default: `98518832`, current iPad account). Same per-account caveat as `encrypt` — see [⚠️ Important: Keystream Is Per-Account](#%EF%B8%8F-important-keystream-is-per-account).
+- `--trailer-byte <0xNN>` — passed through to encrypt (default: `0x67`).
+- `--keep-intermediate` / `--no-keep-intermediate` — control whether `<save>_bedrock_intermediate/` survives after a successful encrypt. Default is **keep** (debug-friendly: re-run encrypt with different keystream/trailer without redoing the slow Chunker step).
+
+#### ⚠️ What's Lost (Chunker Limitation, To Be Fixed)
+
+Chunker's Java → Bedrock pass strips player state. After `java-to-netease`, on iPad you'll see:
+
+- **Player position** — defaults to world spawn (may land inside a block).
+- **Player health / hunger / XP** — reset to defaults.
+- **Inventory and Ender Chest** — empty.
+- **Abilities** (walk speed, fly mode, invulnerability) — incorrect defaults, causing visible glitches (e.g. "walking faster than sprinting").
+- **Some Java-only blocks** (1.21.4's `leaf_litter`, `bush`, `firefly_bush`) — replaced with nearest Bedrock equivalent or air.
+
+The world itself (terrain, buildings, chests, tile entities) round-trips faithfully. Only the player slice is lossy.
+
+A follow-up tool will read `Data.Player` from Java `level.dat` and write a translated `~local_player` into the Bedrock intermediate before encryption. Until that ships, treat `java-to-netease` output as "playable world, fresh player".
+
+#### Notes
+
+- Java input must look like a Java save (has `level.dat`, no `db/`). If you accidentally pass a Bedrock save, the command refuses and points you at `encrypt`.
+- The keystream caveat from `encrypt` applies verbatim: the default key is verified for one specific iPad account. Use `mcce.py inspect` on a save from the target account to recover the correct key, then pass it through with `--keystream`.
+- iPad install procedure is identical to `encrypt`: create a fresh empty world on the iPad NetEase client to claim a slot, then replace its directory contents with `<save>_netease/`.
+- **Requires .venv Python** (the encrypt step needs amulet-leveldb to patch `~local_player`). Also requires Chunker JAR at `~/.local/share/mcce/chunker-cli-*.jar` — see [Setup](#setup-one-time).
 
 ## What's Preserved vs What's Lost
 

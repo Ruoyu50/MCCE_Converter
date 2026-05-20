@@ -79,6 +79,11 @@ from pathlib import Path
 
 SSTABLE_MAGIC = bytes.fromhex("57fb808b247547db")
 DEFAULT_JAVA_FORMAT = "JAVA_1_21_0"
+# Chunker output-format string for the standard-Bedrock intermediate produced by
+# java-to-netease. Verified end-to-end against iPad NetEase client 3.8.15
+# (Bedrock 1.21.90). If Chunker doesn't recognize this exact string,
+# `java-to-netease --format <other>` overrides it.
+DEFAULT_BEDROCK_FORMAT = "BEDROCK_R21_90"
 
 # 4-byte sentinel NetEase writes verbatim at the start of every sealed db/ file
 # (.ldb / MANIFEST-* / CURRENT). After the per-save XOR is applied during a
@@ -610,23 +615,29 @@ def chunker_install_instructions() -> str:
 
 def run_chunker(
     jar: Path,
-    bedrock_dir: Path,
-    java_dir: Path,
+    input_dir: Path,
+    output_dir: Path,
     fmt: str,
     seed: int | None,
 ) -> None:
-    if java_dir.exists():
-        raise SystemExit(f"error: {java_dir} already exists; refusing to overwrite")
+    """Run Chunker CLI converting `input_dir` → `output_dir` in format `fmt`.
+
+    Direction-agnostic: works for both Bedrock→Java (convert) and
+    Java→Bedrock (java-to-netease step 1). Chunker auto-detects the input
+    edition from the directory layout; `-f` only names the *output* format.
+    """
+    if output_dir.exists():
+        raise SystemExit(f"error: {output_dir} already exists; refusing to overwrite")
     cmd = [
         "java", "-jar", str(jar),
-        "-i", str(bedrock_dir),
-        "-o", str(java_dir),
+        "-i", str(input_dir),
+        "-o", str(output_dir),
         "-f", fmt,
     ]
     if seed is not None:
         # Chunker's ChunkerLevelSettings.RandomSeed is a String field; the JSON
         # passed via -s is merged on top of the settings read from the source
-        # before the Java writer puts it into WorldGenSettings.seed.
+        # before the writer puts it into the target world's seed slot.
         cmd += ["-s", json.dumps({"RandomSeed": str(seed)})]
     print(f"running: {shlex.join(cmd)}")
     try:
@@ -635,9 +646,9 @@ def run_chunker(
         raise SystemExit("error: `java` not on $PATH. Install Java 17+.")
     if result.returncode != 0:
         raise SystemExit(f"error: chunker-cli exited {result.returncode}")
-    if not (java_dir / "level.dat").is_file():
+    if not (output_dir / "level.dat").is_file():
         raise SystemExit(
-            f"error: chunker finished but {java_dir}/level.dat is missing — "
+            f"error: chunker finished but {output_dir}/level.dat is missing — "
             f"check Chunker's stdout above for errors."
         )
 
@@ -737,6 +748,10 @@ def netease_dir_for(src: Path) -> Path:
     return src.parent / (src.name + "_netease")
 
 
+def bedrock_intermediate_dir_for(src: Path) -> Path:
+    return src.parent / (src.name + "_bedrock_intermediate")
+
+
 def cmd_encrypt(args: argparse.Namespace) -> int:
     src = Path(args.save).resolve()
     if not src.is_dir():
@@ -763,6 +778,102 @@ def cmd_encrypt(args: argparse.Namespace) -> int:
     reseal_db_in_place(dst, ks, verbose=True)
     print()
     print(f"done. NetEase-encrypted save at: {dst}")
+    print(
+        "To test on iPad: create a fresh world in the NetEase client to claim a "
+        "slot, then replace its directory contents with this output."
+    )
+    return 0
+
+
+def cmd_java_to_netease(args: argparse.Namespace) -> int:
+    """Java Edition → NetEase iPad, one-shot. Mirrors `convert` in the
+    opposite direction:
+
+      Java save  →  (Chunker)  →  standard Bedrock  →  (encrypt)  →  NetEase
+
+    Step 1 lands at <save>_bedrock_intermediate/ (kept by default for
+    debugging — pass --no-keep-intermediate to delete it on success).
+    Step 2 lands at <save>_netease/ (or wherever --output points).
+    """
+    src = Path(args.save).resolve()
+    if not src.is_dir():
+        raise SystemExit(f"error: {src} is not a directory")
+    if not (src / "level.dat").is_file():
+        raise SystemExit(f"error: {src}/level.dat missing — not a Java save?")
+    if (src / "db").is_dir():
+        # A Bedrock save has db/. Flagging this catches the "I meant to pass
+        # the decrypted intermediate" mistake before Chunker fails confusingly.
+        raise SystemExit(
+            f"error: {src}/db/ exists — looks like a Bedrock save, not Java. "
+            f"Use `encrypt` directly on a Bedrock save."
+        )
+
+    jar = find_chunker_jar()
+    if jar is None:
+        print(chunker_install_instructions(), file=sys.stderr)
+        return 2
+
+    bedrock_dir = (
+        Path(args.bedrock_intermediate).resolve()
+        if args.bedrock_intermediate
+        else bedrock_intermediate_dir_for(src)
+    )
+    netease_dir = (
+        Path(args.output).resolve() if args.output else netease_dir_for(src)
+    )
+    ks: bytes = args.keystream
+    xx: int = args.trailer_byte
+
+    print(f"chunker jar:              {jar}")
+    print(f"source (Java, read-only): {src}")
+    print(f"bedrock intermediate:     {bedrock_dir}")
+    print(f"netease output:           {netease_dir}")
+    print(f"bedrock format (Chunker): {args.format}")
+    print(f"keystream:                {_format_keystream(ks)}")
+    print(f"~local_player trailer XX: 0x{xx:02x} = {xx}")
+    print(f"keep intermediate:        {args.keep_intermediate}")
+    print()
+
+    # Refuse to overwrite either destination — let the user clear it explicitly.
+    if bedrock_dir.exists():
+        raise SystemExit(
+            f"error: bedrock intermediate {bedrock_dir} already exists. "
+            f"Remove it or pick a different --bedrock-intermediate."
+        )
+    if netease_dir.exists():
+        raise SystemExit(
+            f"error: netease output {netease_dir} already exists. "
+            f"Remove it or pick a different --output."
+        )
+
+    print("=== step 1: chunker Java → standard Bedrock ===")
+    run_chunker(jar, src, bedrock_dir, args.format, seed=None)
+    if not (bedrock_dir / "db").is_dir():
+        raise SystemExit(
+            f"error: chunker finished but {bedrock_dir}/db/ is missing — "
+            f"Chunker's output isn't a valid Bedrock save. Check the format "
+            f"string ({args.format!r}) and Chunker's stdout above."
+        )
+    print()
+    print("=== step 2: encrypt standard Bedrock → NetEase iPad ===")
+    print("--- copy bedrock intermediate to netease output tree ---")
+    copy_save_tree(bedrock_dir, netease_dir)
+    print()
+    print("--- patch ~local_player trailer ---")
+    add_netease_player_trailer(netease_dir, xx)
+    print()
+    print("--- encrypt sealed files in db/ ---")
+    reseal_db_in_place(netease_dir, ks, verbose=True)
+
+    if not args.keep_intermediate:
+        print()
+        print(f"--- removing intermediate ({bedrock_dir}) ---")
+        shutil.rmtree(bedrock_dir)
+
+    print()
+    print(f"done. NetEase-encrypted save at: {netease_dir}")
+    if args.keep_intermediate:
+        print(f"intermediate Bedrock save kept: {bedrock_dir}")
     print(
         "To test on iPad: create a fresh world in the NetEase client to claim a "
         "slot, then replace its directory contents with this output."
@@ -870,6 +981,58 @@ def build_parser() -> argparse.ArgumentParser:
              f"observed XX varies per save, but 0x67 is the most common).",
     )
     pe.set_defaults(func=cmd_encrypt)
+
+    pj = sub.add_parser(
+        "java-to-netease",
+        help="full reverse pipeline: Java save → Chunker → standard Bedrock → encrypt for NetEase iPad",
+    )
+    pj.add_argument("save", help="path to a Java Edition save directory")
+    pj.add_argument(
+        "-o", "--output",
+        help="override final NetEase output directory (default: <save>_netease)",
+    )
+    pj.add_argument(
+        "--bedrock-intermediate",
+        help="override intermediate Bedrock directory "
+             "(default: <save>_bedrock_intermediate)",
+    )
+    pj.add_argument(
+        "-f", "--format", default=DEFAULT_BEDROCK_FORMAT,
+        help=f"Chunker output format for the Bedrock intermediate "
+             f"(default: {DEFAULT_BEDROCK_FORMAT}). Override if Chunker "
+             f"doesn't recognize this version string for your Bedrock target.",
+    )
+    pj.add_argument(
+        "--keystream",
+        type=_parse_keystream_arg,
+        default=DEFAULT_ENCRYPT_KEYSTREAM,
+        help=f"8-byte XOR keystream passed through to encrypt — ASCII "
+             f"(e.g. 98518832) or 16-hex "
+             f"(default: {DEFAULT_ENCRYPT_KEYSTREAM.decode()}, current iPad "
+             f"account's key). Recover with `inspect` on any save from the "
+             f"target account.",
+    )
+    pj.add_argument(
+        "--trailer-byte",
+        type=_parse_trailer_byte_arg,
+        default=DEFAULT_LOCAL_PLAYER_TRAILER_XX,
+        help=f"byte XX in the 3-byte ~local_player trailer 'XX c0 00' "
+             f"(default: 0x{DEFAULT_LOCAL_PLAYER_TRAILER_XX:02x}).",
+    )
+    pj.add_argument(
+        "--keep-intermediate", dest="keep_intermediate",
+        action="store_true", default=True,
+        help="keep the intermediate Bedrock directory after success "
+             "(default; useful for debugging or re-running encrypt with "
+             "different flags without redoing Chunker)",
+    )
+    pj.add_argument(
+        "--no-keep-intermediate", dest="keep_intermediate",
+        action="store_false",
+        help="delete the intermediate Bedrock directory after a successful "
+             "encrypt",
+    )
+    pj.set_defaults(func=cmd_java_to_netease)
     return p
 
 
