@@ -18,18 +18,17 @@ So Phase 1b uses a *template overlay*: read a real NetEase save's
 Java-derived fields onto it. The result is a genuine NetEase player entity
 carrying the Java player's position/health.
 
-Phased rollout (this file is Phase 3a):
+Phased rollout (this file is Phase 3b):
   Phase 1b (done): Pos, Rotation, Health — overlaid onto a template.
   Phase 2 (done):  XP (level + progress), food (hunger/saturation/exhaustion),
-                   dimension. abilities deliberately NOT overlaid (researched —
-                   the template's survival abilities matched the Java player's
-                   on gameplay-relevant fields; the Java↔Bedrock field-name and
-                   case differences make blind copying risky, revisit in 2.5 if
-                   a creative-mode save misbehaves).
-  Phase 3a (now):  inventory + equipment, BASIC items only — id (pass-through),
-                   count, durability. New Java 1.20.5+ component format.
-  Phase 3b (later):enchantments (string→numeric ench), custom names, item-id
-                   override table for the ~dozens of genuinely-different ids.
+                   dimension + SelectedInventorySlot. abilities deliberately NOT
+                   overlaid (researched — the template's survival abilities
+                   matched the Java player's on gameplay-relevant fields).
+  Phase 3a (done): inventory + equipment, BASIC items — id, count, durability.
+  Phase 3b (now):  enchantments (Java string → Bedrock numeric ench id),
+                   enchanted-book stored enchants, custom names (Java JSON text
+                   → Bedrock tag.display.Name), item-id override table for the
+                   handful of genuinely-different ids (cobweb/web, lily_pad/...).
 
 Ground-truth facts (confirmed by reading real NetEase iPad 3.8.15 /
 Bedrock 1.21.90 `~local_player` values from saves P, B-iPad, B-Desktop):
@@ -302,6 +301,86 @@ def _apply_dimension(java_player, bedrock_player) -> str | None:
 #     each item = {id:string, count:int, components:compound} (no Slot).
 #   Durability is components["minecraft:damage"] (int).
 
+# Java enchantment string id -> Bedrock numeric id. Bedrock uses its OWN
+# contiguous 0..37 ordering (sharpness=9), NOT Java's legacy pre-1.13 numeric
+# ids (where sharpness=16). Confirmed against minecraft.wiki Bedrock data values
+# AND a real NetEase save (B template's diamond_pickaxe carried ench id=18 and
+# id=26 = fortune + mending, matching this table). 38-40 are the 1.21 mace
+# enchants. Unknown enchants are skipped with a warning, never guessed.
+ENCHANTMENT_JAVA_TO_BEDROCK = {
+    "protection": 0, "fire_protection": 1, "feather_falling": 2,
+    "blast_protection": 3, "projectile_protection": 4, "thorns": 5,
+    "respiration": 6, "depth_strider": 7, "aqua_affinity": 8, "sharpness": 9,
+    "smite": 10, "bane_of_arthropods": 11, "knockback": 12, "fire_aspect": 13,
+    "looting": 14, "efficiency": 15, "silk_touch": 16, "unbreaking": 17,
+    "fortune": 18, "power": 19, "punch": 20, "flame": 21, "infinity": 22,
+    "luck_of_the_sea": 23, "lure": 24, "frost_walker": 25, "mending": 26,
+    "binding_curse": 27, "vanishing_curse": 28, "impaling": 29, "riptide": 30,
+    "loyalty": 31, "channeling": 32, "multishot": 33, "piercing": 34,
+    "quick_charge": 35, "soul_speed": 36, "swift_sneak": 37,
+    "density": 38, "breach": 39, "wind_burst": 40,
+}
+
+# Java item id -> Bedrock item id, ONLY for ids that genuinely differ. Modern
+# Bedrock unified most ids; this is a deliberately conservative, curated set
+# (mis-mapping is worse than pass-through). Extend from the Bedrock data-values
+# wiki as broken items surface.
+ITEM_ID_JAVA_TO_BEDROCK = {
+    "minecraft:cobweb": "minecraft:web",
+    "minecraft:lily_pad": "minecraft:waterlily",
+}
+
+
+def _bedrock_ench_id(java_ench_id: str):
+    """Map a Java enchant id (with or without minecraft: prefix) to Bedrock's
+    numeric id, or None if unknown."""
+    name = java_ench_id.split(":", 1)[1] if ":" in java_ench_id else java_ench_id
+    return ENCHANTMENT_JAVA_TO_BEDROCK.get(name)
+
+
+def _build_ench_list(java_ench_compound, item_label: str):
+    """Java enchantments compound {"minecraft:sharpness": level, ...} (flat, new
+    1.20.5+ format — no `levels` wrapper) -> Bedrock tag.ench ListTag of
+    {id:short, lvl:short, modEnchant:""}. Returns (ListTag, n_unknown)."""
+    import amulet_nbt as anbt
+    elems = []
+    n_unknown = 0
+    for jid, level in java_ench_compound.items():
+        bid = _bedrock_ench_id(str(jid))
+        if bid is None:
+            n_unknown += 1
+            print(f"    [player-translate] warning: unknown enchant {jid!r} on "
+                  f"{item_label}; skipped")
+            continue
+        e = anbt.CompoundTag()
+        e["id"] = anbt.ShortTag(bid)
+        e["lvl"] = anbt.ShortTag(max(0, min(32767, int(level))))
+        e["modEnchant"] = anbt.StringTag("")   # NetEase-specific field, kept empty
+        elems.append(e)
+    return anbt.ListTag(elems) if elems else None, n_unknown
+
+
+def _java_text_to_plain(raw: str) -> str:
+    """Java custom_name is a JSON text component serialized as a string, e.g.
+    '"Excalibur"' or '{"text":"Excalibur"}'. Extract plain text."""
+    import json
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return raw.strip('"')
+    if isinstance(parsed, str):
+        return parsed
+    if isinstance(parsed, dict):
+        text = parsed.get("text", "")
+        for extra in parsed.get("extra", []) or []:
+            if isinstance(extra, str):
+                text += extra
+            elif isinstance(extra, dict):
+                text += extra.get("text", "")
+        return text
+    return raw.strip('"')
+
+
 def _empty_bedrock_item(slot: int | None = None):
     import amulet_nbt as anbt
     it = anbt.CompoundTag()
@@ -316,24 +395,26 @@ def _empty_bedrock_item(slot: int | None = None):
 
 def translate_item_java_to_bedrock(java_item, keep_slot: bool = True):
     """Java 1.20.5+ component-format item → Bedrock item compound (or None for
-    air/empty/unconvertible). Phase 3a: id (pass-through) + count + durability.
-    Enchants / custom names / other components are deliberately ignored (3b)."""
+    air/empty/unconvertible). Phase 3a: id (+ override table), count, durability.
+    Phase 3b: enchantments, stored enchantments (books), custom names."""
     import amulet_nbt as anbt
     jid = java_item.get("id")
     if jid is None:
         return None
-    name = str(jid)
-    if name in ("", "minecraft:air"):
+    orig = str(jid)
+    if orig in ("", "minecraft:air"):
         return None
 
     out = anbt.CompoundTag()
-    out["Name"] = anbt.StringTag(name)          # pass-through; id-diff overrides are 3b
+    out["Name"] = anbt.StringTag(ITEM_ID_JAVA_TO_BEDROCK.get(orig, orig))
     cnt = int(java_item.get("count", 1))
     out["Count"] = anbt.ByteTag(max(0, min(127, cnt)))
 
-    dmg = 0
     comps = java_item.get("components")
-    if comps is not None and hasattr(comps, "get"):
+    has_comps = comps is not None and hasattr(comps, "get")
+
+    dmg = 0
+    if has_comps:
         jd = comps.get("minecraft:damage")
         if jd is not None:
             try:
@@ -342,6 +423,35 @@ def translate_item_java_to_bedrock(java_item, keep_slot: bool = True):
                 dmg = 0
     out["Damage"] = anbt.ShortTag(max(0, min(32767, dmg)))
     out["WasPickedUp"] = anbt.ByteTag(0)
+
+    # ---- Phase 3b: build tag (enchants / stored enchants / custom name) ----
+    if has_comps:
+        tag = anbt.CompoundTag()
+
+        # held-item enchantments and enchanted-book stored enchantments both map
+        # to Bedrock tag.ench. (No enchanted book in the test save, so the book
+        # path is best-effort/unverified; Bedrock held-item enchants use ench.)
+        for comp_key in ("minecraft:enchantments", "minecraft:stored_enchantments"):
+            jench = comps.get(comp_key)
+            if jench is not None and hasattr(jench, "items"):
+                ench_list, _ = _build_ench_list(jench, orig)
+                if ench_list is not None:
+                    if "ench" in tag:
+                        for e in ench_list:
+                            tag["ench"].append(e)
+                    else:
+                        tag["ench"] = ench_list
+
+        jname = comps.get("minecraft:custom_name")
+        if jname is not None:
+            text = _java_text_to_plain(str(jname))
+            if text:
+                disp = anbt.CompoundTag()
+                disp["Name"] = anbt.StringTag(text)
+                tag["display"] = disp
+
+        if len(tag) > 0:
+            out["tag"] = tag
 
     if keep_slot and "Slot" in java_item:
         out["Slot"] = anbt.ByteTag(int(java_item["Slot"]))

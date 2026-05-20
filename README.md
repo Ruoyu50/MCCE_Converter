@@ -197,11 +197,11 @@ cp -r /path/to/iPad_export_java ~/Library/Application\ Support/minecraft/saves/M
 - `--trailer-byte <0xNN>` — passed through to encrypt (default: `0x67`).
 - `--keep-intermediate` / `--no-keep-intermediate` — control whether `<save>_bedrock_intermediate/` survives after a successful encrypt. Default is **keep** (debug-friendly: re-run encrypt with different keystream/trailer without redoing the slow Chunker step).
 
-#### Player State: Mostly Restored (Item NBT Conversion still WIP)
+#### Player State: Restored
 
-Chunker's Java → Bedrock pass emits only a minimal player stub, so player state used to be lost entirely. The `--player-template` overlay (player_translate.py) now restores most of it. Status, verified on iPad NetEase 3.8.15 (Bedrock 1.21.90):
+Chunker's Java → Bedrock pass emits only a minimal player stub, so player state used to be lost entirely. The `--player-template` overlay (player_translate.py) now restores it. For a typical survival save, `java-to-netease` is end-to-end equivalent to playing the Java save itself. Verified on iPad NetEase 3.8.15 (Bedrock 1.21.90):
 
-**✓ Restored (Phase 1b + 2 + 3a):**
+**✓ Restored (Phase 1b + 2 + 3a + 3b):**
 - **Player position** (Pos, with the Bedrock +1.62 eye-height offset) and **rotation**.
 - **Health** (written as the `minecraft:health` attribute, not the legacy top-level short).
 - **XP** (level + progress).
@@ -210,18 +210,17 @@ Chunker's Java → Bedrock pass emits only a minimal player stub, so player stat
 - **Inventory** items — id, count, and durability, rebuilt as Bedrock's fixed 36-slot list with slot order preserved.
 - **Armor + Offhand** equipment — Java's `equipment` compound mapped to Bedrock `Armor[0..3]` (head/chest/legs/feet) + `Offhand`.
 - **Selected hotbar slot** — Java `SelectedItemSlot` → Bedrock `SelectedInventorySlot`, so the held item matches.
+- **Enchantments** — Java string enchant IDs → Bedrock numeric `tag.ench` IDs (a ~41-entry table using Bedrock's own 0..37 scheme, e.g. sharpness=9). Enchanted gear and books carry their enchants and levels.
+- **Custom-named items** — anvil-renamed items: Java JSON text component → Bedrock `tag.display.Name` plain string.
+- **ID-differing items** — the handful of items whose IDs differ between editions (`cobweb`→`web`, `lily_pad`→`waterlily`) are remapped via a conservative override table; everything else passes through unchanged.
 
-**✗ Still lost (Phase 3b, WIP):**
-- **Enchantments** — Java enchanted gear comes through as the plain (un-enchanted) item (Java string enchant IDs ↔ Bedrock numeric IDs not yet mapped).
-- **Custom-named items** — anvil-renamed items show their default name (Java JSON text component ↔ Bedrock plain string not yet converted).
-- **ID-differing items** — the ~5% of items whose IDs differ between editions (`cobweb`/`web`, `lily_pad`/`waterlily`, etc.) may vanish or look wrong on iPad until the item-id overlay table lands.
-- **Ender Chest** contents.
-
-These remaining items need Java↔Bedrock item-id and enchantment-id mapping, which is the Phase 3b work.
-
-**Not overlaid by design:**
-- **Abilities** (walk/fly speed, fly mode, etc.) — kept from the template. For survival-mode players the template's abilities match; a creative-mode Java player would come through as the template's gamemode. Revisited only if it misbehaves.
-- **Some Java-only blocks** (1.21.4's `leaf_litter`, `bush`, `firefly_bush`) — Chunker replaces with the nearest Bedrock equivalent or air.
+**Known limitations:**
+- **Ender Chest** contents — not copied.
+- **Player skin** — account-bound, not stored in the save; out of scope.
+- **Persistent potion/buff effects** — Bedrock doesn't persist `active_effects` in the player NBT the way Java does; out of scope.
+- **Fine-grained abilities** — abilities (walk/fly speed, fly mode, gamemode flags) are kept from the template. For survival players this is correct; a creative-mode Java save would come through as the template's (survival) gamemode.
+- **Old Java save format** (pre-1.20.5, armor in inventory slots 100-103, items using the legacy `tag`/`Count`/`id` shape) — not supported; only the 1.20.5+ component format is handled.
+- **Some Java-only blocks** (1.21.4's `leaf_litter`, `bush`, `firefly_bush`) — Chunker replaces with the nearest Bedrock equivalent or air (a Chunker block-level limitation, not player state).
 
 The world itself (terrain, buildings, chests, tile entities) round-trips faithfully.
 
