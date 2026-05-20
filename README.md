@@ -210,7 +210,7 @@ The `--player-template` save donates the `~local_player` entity skeleton that th
 
 Chunker's Java → Bedrock pass emits only a minimal player stub, so player state used to be lost entirely. The `--player-template` overlay (player_translate.py) now restores it. For a typical survival save, `java-to-netease` is end-to-end equivalent to playing the Java save itself. Verified on iPad NetEase 3.8.15 (Bedrock 1.21.90):
 
-**✓ Restored (Phase 1b + 2 + 3a + 3b + 3d):**
+**✓ Restored (Phase 1b + 2 + 3a + 3b + 3c):**
 - **Player position** (Pos, with the Bedrock +1.62 eye-height offset) and **rotation**.
 - **Health** (written as the `minecraft:health` attribute, not the legacy top-level short).
 - **XP** (level + progress).
@@ -223,12 +223,12 @@ Chunker's Java → Bedrock pass emits only a minimal player stub, so player stat
 - **Custom-named items** — anvil-renamed items: Java JSON text component → Bedrock `tag.display.Name` plain string.
 - **ID-differing items** — the handful of items whose IDs differ between editions (`cobweb`→`web`, `lily_pad`→`waterlily`) are remapped via a conservative override table; everything else passes through unchanged.
 - **Ender Chest** contents — uses the same translation pipeline as Inventory (`EnderItems` → `EnderChestInventory`, 27 slots), so enchants, custom names, and id overrides are preserved too.
-- **Game mode** — Java `playerGameType` → Bedrock `PlayerGameMode`. Java creative saves now render as creative on iPad (and survival as survival). Note: `abilities` (walk/fly speed, fly permission) are still kept from the template, so for a fully consistent creative-mode result on iPad you want a template that itself has creative abilities — otherwise the iPad client may show creative-mode UI but enforce survival abilities. For survival saves, this concern doesn't apply.
 
 **Known limitations:**
+- **Game mode** — Out of scope. The iPad NetEase client decides the player's game mode based on **what you select when creating the empty placeholder world on iPad** (the new-world dialog's Game Mode dropdown), not the fields in the save data. We tried writing both `level.dat.GameType` and `~local_player.PlayerGameMode` to match the Java player's current mode, but iPad ignores both on load. **Workaround**: when creating the placeholder world on iPad before replacing its db/ contents, select the same game mode as your Java save. If the mode is wrong after import, switch it in Settings → Game Mode (you may need to toggle default first to unlock personal mode).
 - **Player skin** — account-bound, not stored in the save; out of scope.
 - **Persistent potion/buff effects** — Bedrock doesn't persist `active_effects` in the player NBT the way Java does; out of scope.
-- **Fine-grained abilities** — abilities (walk/fly speed, fly mode, gamemode flags) are kept from the template. For survival players this is correct; a creative-mode Java save would come through as the template's (survival) gamemode.
+- **Fine-grained abilities** — abilities (walk/fly speed, fly permission) are kept from the template, not the Java save. For survival players this is correct; a creative-mode save may show subtle ability discrepancies even once its game mode is set correctly (see above).
 - **Old Java save format** (pre-1.20.5, armor in inventory slots 100-103, items using the legacy `tag`/`Count`/`id` shape) — not supported; only the 1.20.5+ component format is handled.
 - **Some Java-only blocks** (1.21.4's `leaf_litter`, `bush`, `firefly_bush`) — Chunker replaces with the nearest Bedrock equivalent or air (a Chunker block-level limitation, not player state).
 

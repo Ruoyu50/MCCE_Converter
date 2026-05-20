@@ -31,14 +31,11 @@ Phased rollout (this file is Phase 3b):
                    handful of genuinely-different ids (cobweb/web, lily_pad/...).
   Phase 3c (done): ender chest (Java EnderItems → Bedrock EnderChestInventory,
                    27 slots, reusing the item pipeline).
-  Phase 3d (now):  playerGameType → PlayerGameMode (gamemode covering). Was
-                   implicit before — B template's PlayerGameMode=0 effectively
-                   forced all output to survival on iPad. Now Java's gamemode is
-                   the source of truth. abilities still not overlaid; if Java is
-                   creative but the template is survival, iPad shows
-                   creative-mode UI but with survival abilities — visible
-                   discrepancy. Mitigation: pick a template whose abilities
-                   match the use case (B = survival, recommended).
+  Phase 3d + 3e (REVERTED): tried writing game mode into ~local_player.
+                   PlayerGameMode (3d) and level.dat.GameType (3e). iPad NetEase
+                   ignores both on load — the loaded mode tracks the new-world
+                   UI selection instead. Game mode is out of scope; see README
+                   "Known limitations".
 
 Ground-truth facts (confirmed by reading real NetEase iPad 3.8.15 /
 Bedrock 1.21.90 `~local_player` values from saves P, B-iPad, B-Desktop):
@@ -574,23 +571,10 @@ def _apply_ender_chest(java_player, bedrock_player) -> str | None:
     return f"Ender Chest -> {n_items} items ({n_skipped} unknown skipped)"
 
 
-def _apply_gamemode(java_player, bedrock_player) -> str | None:
-    """Java playerGameType (IntTag 0-3) → Bedrock PlayerGameMode (IntTag 0-3).
-    Both editions use the same scheme: 0=survival, 1=creative, 2=adventure,
-    3=spectator. Direct int copy with sanity bounds.
-
-    Without this, the player gets the template's PlayerGameMode (B template=0/
-    survival; fresh empty-world templates=5/invalid-sentinel, which makes the
-    NetEase client reject the player and fall back to (0,-2,0))."""
-    import amulet_nbt as anbt
-    jgm = java_player.get("playerGameType")
-    if jgm is None:
-        return None
-    gm = int(jgm)
-    if gm not in (0, 1, 2, 3):
-        return None
-    bedrock_player["PlayerGameMode"] = anbt.IntTag(gm)
-    return f"playerGameType {gm} -> PlayerGameMode = {gm}"
+# Game mode covering was attempted (PlayerGameMode in Phase 3d, level.dat
+# GameType in Phase 3e) but reverted: iPad NetEase ignores both fields on load
+# and takes the mode from the new-world UI selection instead. See README
+# "Known limitations".
 
 
 # ---------------------------------------------------------------- template loading
@@ -712,8 +696,7 @@ def translate_player_java_to_bedrock(
     for fn in (_apply_pos, _apply_rotation, _apply_health,
                _apply_xp, _apply_food, _apply_dimension,
                _apply_inventory, _apply_equipment,
-               _apply_selected_slot, _apply_ender_chest,
-               _apply_gamemode):
+               _apply_selected_slot, _apply_ender_chest):
         msg = fn(java_player, bedrock_player)
         if msg:
             applied.append(msg)
