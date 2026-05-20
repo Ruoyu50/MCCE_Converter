@@ -209,15 +209,13 @@ Chunker's Java → Bedrock pass emits only a minimal player stub, so player stat
 - **Dimension** (overworld / nether / end).
 - **Inventory** items — id, count, and durability, rebuilt as Bedrock's fixed 36-slot list with slot order preserved.
 - **Armor + Offhand** equipment — Java's `equipment` compound mapped to Bedrock `Armor[0..3]` (head/chest/legs/feet) + `Offhand`.
+- **Selected hotbar slot** — Java `SelectedItemSlot` → Bedrock `SelectedInventorySlot`, so the held item matches.
 
 **✗ Still lost (Phase 3b, WIP):**
 - **Enchantments** — Java enchanted gear comes through as the plain (un-enchanted) item (Java string enchant IDs ↔ Bedrock numeric IDs not yet mapped).
 - **Custom-named items** — anvil-renamed items show their default name (Java JSON text component ↔ Bedrock plain string not yet converted).
 - **ID-differing items** — the ~5% of items whose IDs differ between editions (`cobweb`/`web`, `lily_pad`/`waterlily`, etc.) may vanish or look wrong on iPad until the item-id overlay table lands.
 - **Ender Chest** contents.
-
-**⏳ Coming next (immediately after 3a):**
-- **SelectedInventorySlot** — the held hotbar slot is currently the template's, not the Java player's (`SelectedItemSlot`). Trivial pass-through, planned next.
 
 These remaining items need Java↔Bedrock item-id and enchantment-id mapping, which is the Phase 3b work.
 

@@ -405,6 +405,20 @@ def _apply_equipment(java_player, bedrock_player) -> str | None:
     return f"Equipment -> {n_armor} armor piece(s)" + (", offhand" if boff is not None else "")
 
 
+def _apply_selected_slot(java_player, bedrock_player) -> str | None:
+    """Java SelectedItemSlot (IntTag, 0-8 hotbar index) → Bedrock
+    SelectedInventorySlot (IntTag). Confirmed field names by reading a real
+    NetEase player (Bedrock uses SelectedInventorySlot; Java uses
+    SelectedItemSlot). Pass-through int, clamped to [0, 8]."""
+    import amulet_nbt as anbt
+    jsel = java_player.get("SelectedItemSlot")
+    if jsel is None:
+        return None
+    s = max(0, min(8, int(jsel)))
+    bedrock_player["SelectedInventorySlot"] = anbt.IntTag(s)
+    return f"SelectedItemSlot {int(jsel)} -> SelectedInventorySlot = {s}"
+
+
 # ---------------------------------------------------------------- template loading
 
 def _read_local_player_value(db_dir: Path) -> bytes:
@@ -523,7 +537,8 @@ def translate_player_java_to_bedrock(
     applied = []
     for fn in (_apply_pos, _apply_rotation, _apply_health,
                _apply_xp, _apply_food, _apply_dimension,
-               _apply_inventory, _apply_equipment):
+               _apply_inventory, _apply_equipment,
+               _apply_selected_slot):
         msg = fn(java_player, bedrock_player)
         if msg:
             applied.append(msg)
