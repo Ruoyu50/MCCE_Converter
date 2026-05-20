@@ -191,23 +191,35 @@ cp -r /path/to/iPad_export_java ~/Library/Application\ Support/minecraft/saves/M
 - `-o, --output <path>` — final NetEase output dir (default: `<save>_netease/`).
 - `--bedrock-intermediate <path>` — where Chunker's intermediate Bedrock save goes (default: `<save>_bedrock_intermediate/`).
 - `-f, --format <STRING>` — Chunker output format for the Bedrock intermediate (default: `BEDROCK_R21_90`, verified on iPad NetEase 3.8.15 / Bedrock 1.21.90). Override if Chunker rejects the default for your Bedrock target version.
+- `--player-template <path>` — path to a known-good NetEase save (encrypted or decrypted). **Required unless `--no-translate-player`.** Chunker's Java→Bedrock player is a 9-field stub the NetEase client rejects (no `identifier` / `definitions` / `format_version` / `internalComponents`, so the engine can't instantiate the player and spawns a default at (0,-2,0)). This flag points at a real NetEase save whose `~local_player` is used as a complete entity skeleton; Java-derived fields (Pos / Rotation / Health / XP / food / dimension) are overlaid onto it. Any of your own exported NetEase saves works.
+- `--no-translate-player` — skip player translation entirely (produces Chunker's default player; the NetEase client spawns a fresh one). Use when you don't have a template or want to compare.
 - `--keystream <8-char-or-16-hex>` — passed through to encrypt (default: `98518832`, current iPad account). Same per-account caveat as `encrypt` — see [⚠️ Important: Keystream Is Per-Account](#%EF%B8%8F-important-keystream-is-per-account).
 - `--trailer-byte <0xNN>` — passed through to encrypt (default: `0x67`).
 - `--keep-intermediate` / `--no-keep-intermediate` — control whether `<save>_bedrock_intermediate/` survives after a successful encrypt. Default is **keep** (debug-friendly: re-run encrypt with different keystream/trailer without redoing the slow Chunker step).
 
-#### ⚠️ What's Lost (Chunker Limitation, To Be Fixed)
+#### Player State: Mostly Restored (Inventory still WIP)
 
-Chunker's Java → Bedrock pass strips player state. After `java-to-netease`, on iPad you'll see:
+Chunker's Java → Bedrock pass emits only a minimal player stub, so player state used to be lost entirely. The `--player-template` overlay (player_translate.py) now restores most of it. Status, verified on iPad NetEase 3.8.15 (Bedrock 1.21.90):
 
-- **Player position** — defaults to world spawn (may land inside a block).
-- **Player health / hunger / XP** — reset to defaults.
-- **Inventory and Ender Chest** — empty.
-- **Abilities** (walk speed, fly mode, invulnerability) — incorrect defaults, causing visible glitches (e.g. "walking faster than sprinting").
-- **Some Java-only blocks** (1.21.4's `leaf_litter`, `bush`, `firefly_bush`) — replaced with nearest Bedrock equivalent or air.
+**✓ Restored (Phase 1b + 2):**
+- **Player position** (Pos, with the Bedrock +1.62 eye-height offset) and **rotation**.
+- **Health** (written as the `minecraft:health` attribute, not the legacy top-level short).
+- **XP** (level + progress).
+- **Food** (hunger / saturation / exhaustion).
+- **Dimension** (overworld / nether / end).
 
-The world itself (terrain, buildings, chests, tile entities) round-trips faithfully. Only the player slice is lossy.
+**✗ Still lost (Phase 3, WIP):**
+- **Inventory** items — empty (carries the template save's inventory instead).
+- **Armor + Offhand** equipment — same.
+- **Ender Chest** contents.
 
-A follow-up tool will read `Data.Player` from Java `level.dat` and write a translated `~local_player` into the Bedrock intermediate before encryption. Until that ships, treat `java-to-netease` output as "playable world, fresh player".
+These need Java↔Bedrock item-id and enchantment-id mapping, which is the Phase 3 work.
+
+**Not overlaid by design:**
+- **Abilities** (walk/fly speed, fly mode, etc.) — kept from the template. For survival-mode players the template's abilities match; a creative-mode Java player would come through as the template's gamemode. Revisited only if it misbehaves.
+- **Some Java-only blocks** (1.21.4's `leaf_litter`, `bush`, `firefly_bush`) — Chunker replaces with the nearest Bedrock equivalent or air.
+
+The world itself (terrain, buildings, chests, tile entities) round-trips faithfully.
 
 #### Notes
 

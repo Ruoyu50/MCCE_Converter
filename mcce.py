@@ -813,6 +813,28 @@ def cmd_java_to_netease(args: argparse.Namespace) -> int:
         print(chunker_install_instructions(), file=sys.stderr)
         return 2
 
+    # Resolve + validate the player template up front (before the slow Chunker
+    # step) so a missing/bad template fails fast. Player translation needs a
+    # real NetEase ~local_player skeleton — Chunker's stub is rejected by the
+    # NetEase client.
+    player_template: Path | None = None
+    if args.translate_player:
+        if not args.player_template:
+            raise SystemExit(
+                "error: player translation needs --player-template <NetEase save>.\n"
+                "Chunker's Java→Bedrock player is a minimal stub the NetEase client\n"
+                "rejects (no identifier/definitions/format_version), so the engine\n"
+                "spawns a default player at (0,-2,0). Point --player-template at a\n"
+                "real NetEase save (encrypted or decrypted) to use its ~local_player\n"
+                "as a skeleton, or pass --no-translate-player to skip translation."
+            )
+        player_template = Path(args.player_template).resolve()
+        if not (player_template / "db").is_dir():
+            raise SystemExit(
+                f"error: --player-template {player_template} has no db/ — "
+                f"not a Bedrock/NetEase save?"
+            )
+
     bedrock_dir = (
         Path(args.bedrock_intermediate).resolve()
         if args.bedrock_intermediate
@@ -832,6 +854,7 @@ def cmd_java_to_netease(args: argparse.Namespace) -> int:
     print(f"keystream:                {_format_keystream(ks)}")
     print(f"~local_player trailer XX: 0x{xx:02x} = {xx}")
     print(f"keep intermediate:        {args.keep_intermediate}")
+    print(f"player template:          {player_template if player_template else '(translation disabled)'}")
     print()
 
     # Refuse to overwrite either destination — let the user clear it explicitly.
@@ -854,6 +877,18 @@ def cmd_java_to_netease(args: argparse.Namespace) -> int:
             f"Chunker's output isn't a valid Bedrock save. Check the format "
             f"string ({args.format!r}) and Chunker's stdout above."
         )
+
+    if args.translate_player:
+        print()
+        print("=== step 1.5: translate Java player state → Bedrock ~local_player ===")
+        from player_translate import translate_player_java_to_bedrock
+        translate_player_java_to_bedrock(
+            src, bedrock_dir / "db", player_template, verbose=True
+        )
+    else:
+        print()
+        print("=== step 1.5: player translation SKIPPED (--no-translate-player) ===")
+
     print()
     print("=== step 2: encrypt standard Bedrock → NetEase iPad ===")
     print("--- copy bedrock intermediate to netease output tree ---")
@@ -1031,6 +1066,21 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="delete the intermediate Bedrock directory after a successful "
              "encrypt",
+    )
+    pj.add_argument(
+        "--player-template",
+        help="path to a known-good NetEase save (encrypted or decrypted) whose "
+             "~local_player is used as a skeleton for player translation. "
+             "Required unless --no-translate-player. Chunker's stub player is "
+             "rejected by the NetEase client, so a real player entity is needed "
+             "as the base; Java Pos/Rotation/Health are overlaid onto it.",
+    )
+    pj.add_argument(
+        "--no-translate-player", dest="translate_player",
+        action="store_false", default=True,
+        help="skip the player-state translation pass entirely (produces "
+             "Chunker's default player; the NetEase client will spawn a fresh "
+             "player). Use to compare, or when you don't have a template.",
     )
     pj.set_defaults(func=cmd_java_to_netease)
     return p
