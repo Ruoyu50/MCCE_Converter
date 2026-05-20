@@ -191,17 +191,26 @@ cp -r /path/to/iPad_export_java ~/Library/Application\ Support/minecraft/saves/M
 - `-o, --output <path>` — final NetEase output dir (default: `<save>_netease/`).
 - `--bedrock-intermediate <path>` — where Chunker's intermediate Bedrock save goes (default: `<save>_bedrock_intermediate/`).
 - `-f, --format <STRING>` — Chunker output format for the Bedrock intermediate (default: `BEDROCK_R21_90`, verified on iPad NetEase 3.8.15 / Bedrock 1.21.90). Override if Chunker rejects the default for your Bedrock target version.
-- `--player-template <path>` — path to a known-good NetEase save (encrypted or decrypted). **Required unless `--no-translate-player`.** Chunker's Java→Bedrock player is a 9-field stub the NetEase client rejects (no `identifier` / `definitions` / `format_version` / `internalComponents`, so the engine can't instantiate the player and spawns a default at (0,-2,0)). This flag points at a real NetEase save whose `~local_player` is used as a complete entity skeleton; Java-derived fields (Pos / Rotation / Health / XP / food / dimension) are overlaid onto it. Any of your own exported NetEase saves works.
+- `--player-template <path>` — path to a known-good NetEase save (encrypted or decrypted). **Required unless `--no-translate-player`.** Chunker's Java→Bedrock player is a 9-field stub the NetEase client rejects (no `identifier` / `definitions` / `format_version` / `internalComponents`, so the engine can't instantiate the player and spawns a default at (0,-2,0)). This flag points at a real NetEase save whose `~local_player` is used as a complete entity skeleton; the Java player's fields (position, health, XP, food, dimension, inventory, equipment, enchantments, ender chest, game mode, …) are overlaid onto it. See [Template requirements](#template-requirements) for what makes a good template.
 - `--no-translate-player` — skip player translation entirely (produces Chunker's default player; the NetEase client spawns a fresh one). Use when you don't have a template or want to compare.
 - `--keystream <8-char-or-16-hex>` — passed through to encrypt (default: `98518832`, current iPad account). Same per-account caveat as `encrypt` — see [⚠️ Important: Keystream Is Per-Account](#%EF%B8%8F-important-keystream-is-per-account).
 - `--trailer-byte <0xNN>` — passed through to encrypt (default: `0x67`).
 - `--keep-intermediate` / `--no-keep-intermediate` — control whether `<save>_bedrock_intermediate/` survives after a successful encrypt. Default is **keep** (debug-friendly: re-run encrypt with different keystream/trailer without redoing the slow Chunker step).
 
+#### Template requirements
+
+The `--player-template` save donates the `~local_player` entity skeleton that the Java player's fields are overlaid onto. A good template is:
+
+- **A real iPad-exported NetEase save** (encrypted or decrypted). Saves that have been processed by early versions of mcce or similar tools may have lost the NetEase trailer on `~local_player` — those work in some cases but are risky.
+- **From the same iPad account whose keystream you're using** — different accounts use different keystreams.
+- **A save you've actually played in survival for a few seconds, then saved-and-exited.** Fresh "just-created, never-entered" worlds end up with `PlayerGameMode=5` (an invalid sentinel) which used to fail before Phase 3d; even with the fix, the player's **abilities** inherit whatever the template recorded, so a played-survival save is the cleanest default.
+- The example save `B` (`bnqoY7hdBAA=`) used throughout this doc fits the profile: a real survival save, empty ender chest, `PlayerGameMode=0` (survival), survival-default abilities. Any save matching that profile works.
+
 #### Player State: Restored
 
 Chunker's Java → Bedrock pass emits only a minimal player stub, so player state used to be lost entirely. The `--player-template` overlay (player_translate.py) now restores it. For a typical survival save, `java-to-netease` is end-to-end equivalent to playing the Java save itself. Verified on iPad NetEase 3.8.15 (Bedrock 1.21.90):
 
-**✓ Restored (Phase 1b + 2 + 3a + 3b):**
+**✓ Restored (Phase 1b + 2 + 3a + 3b + 3d):**
 - **Player position** (Pos, with the Bedrock +1.62 eye-height offset) and **rotation**.
 - **Health** (written as the `minecraft:health` attribute, not the legacy top-level short).
 - **XP** (level + progress).
@@ -214,6 +223,7 @@ Chunker's Java → Bedrock pass emits only a minimal player stub, so player stat
 - **Custom-named items** — anvil-renamed items: Java JSON text component → Bedrock `tag.display.Name` plain string.
 - **ID-differing items** — the handful of items whose IDs differ between editions (`cobweb`→`web`, `lily_pad`→`waterlily`) are remapped via a conservative override table; everything else passes through unchanged.
 - **Ender Chest** contents — uses the same translation pipeline as Inventory (`EnderItems` → `EnderChestInventory`, 27 slots), so enchants, custom names, and id overrides are preserved too.
+- **Game mode** — Java `playerGameType` → Bedrock `PlayerGameMode`. Java creative saves now render as creative on iPad (and survival as survival). Note: `abilities` (walk/fly speed, fly permission) are still kept from the template, so for a fully consistent creative-mode result on iPad you want a template that itself has creative abilities — otherwise the iPad client may show creative-mode UI but enforce survival abilities. For survival saves, this concern doesn't apply.
 
 **Known limitations:**
 - **Player skin** — account-bound, not stored in the save; out of scope.
