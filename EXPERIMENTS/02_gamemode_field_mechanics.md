@@ -114,3 +114,70 @@ out-of-scope,workaround 是"在 iPad 新建占位世界时手动选对应模式"
 - `8b40e87` — Phase 3d:写 `~local_player.PlayerGameMode`(后证伪、已回滚)
 - (Phase 3e:写 `level.dat.GameType`,未单独成 commit,改动在工作区中证伪)
 - `75f7465` — revert:移除 Phase 3d + 3e 的游戏模式覆盖代码,改为文档化
+
+## 9. 网上调研结果 (2026-05-20)
+
+(本节为事后网上调研,回答 OPEN_QUESTIONS.md #1 的 Q1 / Q2。沿用实验日志
+"只追加不修改"约定:不改前面各节,在此追加发现与对前文的更正。)
+
+### 9.1 搜索关键词
+
+- "Bedrock Edition PlayerGameMode NBT value 5 default world game mode local_player"
+- "minecraft.wiki Bedrock player.dat PlayerGameMode int values survival creative LocalPlayer NBT"
+- "Bedrock PlayerGameMode 5 default world default player follows DefaultGameMode inherit"
+- 旁证:"PlayerGameMode not set / invalid"、"level.dat GameType values bedrock"
+
+只采权威源(minecraft.wiki + barrett777 的 Bedrock NBT gist),不采 fandom 猜测。
+
+### 9.2 找到的权威页面 + 关键引用
+
+- **minecraft.wiki — Bedrock Edition level format**
+  (<https://minecraft.wiki/w/Bedrock_Edition_level_format>):
+  > "[Int] GameType: The default game mode of the player. 0 is Survival,
+  > 1 is Creative, 2 is Adventure, **5 is Default**, and 6 is Spectator."
+- **minecraft.wiki — Game mode / Commands/gamemode**:
+  Bedrock 的 `gamemode` 命令里 "default" 可缩写为 `d` 或 `5`;"Default" 这个
+  个人游戏模式的含义是"把玩家模式设为世界默认模式(即 Create New World 界面 /
+  世界设置里 'Default game mode' 选的那个)",玩家可以再显式覆盖成别的模式。
+- barrett777 Bedrock Player NBT gist
+  (<https://gist.github.com/barrett777/d7c02000aace08c536f13fb1d3f1cf3b>):
+  只给了 `TAG_Int("PlayerGameMode"): 0` 的样例,没有取值表或写入时机说明。
+
+### 9.3 Q1 答案:`PlayerGameMode = 5` = "Default"(已解决)
+
+Bedrock 的游戏模式枚举是 **0/1/2/5/6**(不是 Java 的 0..3):
+`0=Survival, 1=Creative, 2=Adventure, 5=Default, 6=Spectator`。
+
+`5 = Default` 表示**该玩家跟随"世界默认游戏模式"**,而不是一个明确的个人选择。
+它是一个合法值,不是无效哨兵。
+
+### 9.4 Q2 答案:5 何时变成显式 0/1/2/6(部分解决)
+
+由枚举语义推导(未找到权威的"触发条件清单"):因为 5 = "跟随世界默认",玩家
+会一直保持 5,直到**显式设置自己的个人游戏模式**(游戏内切个人模式),这时才
+写入显式值。切**默认游戏模式**改的是世界默认(Default/5 的玩家随之改变表现)。
+这解释了第 4 节里"切默认"和"切个人"都能改变表现、而"新建即退出"保持 5 的观测。
+
+### 9.5 对前文的更正(新增证伪)
+
+- **假设 D(本节新证伪):"`PlayerGameMode = 5` 是无效哨兵,且是 player 实例化
+  失败 / 掉到 (0,-2,0) 的原因。"**
+  —— 证伪。`5` 是合法的 "Default" 值。第 3.3 节"无效哨兵、无法实例化"的措辞
+  被推翻:掉到 (0,-2,0) 的真正原因是 Chunker 的 9 字段 player stub 缺
+  `identifier`/`definitions`/`format_version`/`internalComponents`(见 Phase 1b
+  调研),与 `PlayerGameMode=5` 无关。
+
+### 9.6 调研后仍未解决 + 新实验建议
+
+核心未解问题被这次调研**收窄**为:Default(5) 的玩家跟随的那个"世界默认游戏
+模式"到底存在哪?第 4 节 Phase 3e 已证 **不是** `level.dat.GameType`(覆盖它
+被忽略);而 Phase 3d 写的显式 `PlayerGameMode=1` 加载时也被忽略。所以 iPad
+认的"世界默认模式"在存档数据之外(新建世界 UI 选择落点)。
+
+补充到第 7 节"未尝试路径":
+- **重测 fresh-blank-world 当模板**:既然 5 是合法 Default 而非坏值,一个全新
+  iPad 空白世界的 `~local_player`(113 字段齐全 + `PlayerGameMode=5`)理论上能
+  正常实例化。值得单独验证它能否当干净模板用 —— 之前以为它因 `=5` 失败,这个
+  归因已被推翻,需要重新实测区分"真失败"还是"当初被误判"。
+- **针对性观测世界默认模式落点**:在 iPad 上只改"默认游戏模式"(不进世界),
+  导出前后 diff 整个应用沙箱(非仅 `db/`),定位哪个文件随之变化。
