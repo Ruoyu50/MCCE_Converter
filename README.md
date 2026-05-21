@@ -44,10 +44,10 @@ Pipeline: `NetEase save  ⇄  standard Bedrock  →  Java Edition`. The Bedrock�
 
 ### Three-Step Workflow
 
-1. **Export the save from iPad:**
-   - Open NetEase Minecraft app → your world → Edit → Export
-   - You'll get a directory with a base-64 name (e.g., `uya1ZzFiBwA=`)
-   - Move it to your Mac
+1. **Export the save from iPad** *(iOS flow; the Android flow is not verified in this project):*
+   - Open the iOS **Files** app → **On My iPad** → **Minecraft** → **minecraftWorlds**
+   - Each world is a directory there with a base-64 name (e.g., `uya1ZzFiBwA=`)
+   - Long-press the world's directory → **Share** (AirDrop / "Save to Files" / etc.) to transfer it to your Mac
 
 2. **Convert to Java Edition:**
    ```bash
@@ -101,7 +101,9 @@ Produces `some_bedrock_save_netease/` — a NetEase-format save that the iPad Ne
 #### Full Round-Trip Example
 
 ```bash
-# 1. Export the world from iPad NetEase (Edit → Export). Get a UUID-named dir.
+# 1. Export the world from iPad via the iOS Files app
+#    (On My iPad → Minecraft → minecraftWorlds → long-press the world's dir → Share to Mac).
+#    iOS flow; Android not verified in this project.
 # 2. Decrypt to standard Bedrock.
 python3 mcce.py decrypt /path/to/iPad_export
 # → /path/to/iPad_export_decrypted/  (standard Bedrock)
@@ -115,8 +117,9 @@ python3 mcce.py decrypt /path/to/iPad_export
 # → /path/to/iPad_export_decrypted_netease/
 
 # 5. On iPad: create a fresh empty world in NetEase to claim a save slot.
-#    Find its export directory, replace its contents with
-#    iPad_export_decrypted_netease/'s contents, re-open the world.
+#    Find that world's directory (in iOS Files, under On My iPad → Minecraft → minecraftWorlds),
+#    replace its contents with iPad_export_decrypted_netease/'s contents,
+#    then open the slot from the NetEase client.
 ```
 
 #### What `encrypt` Does, In Order
@@ -240,7 +243,7 @@ The world itself (terrain, buildings, chests, tile entities) round-trips faithfu
 
 - Java input must look like a Java save (has `level.dat`, no `db/`). If you accidentally pass a Bedrock save, the command refuses and points you at `encrypt`.
 - The keystream caveat from `encrypt` applies verbatim: the default key is verified for one specific iPad account. Use `mcce.py inspect` on a save from the target account to recover the correct key, then pass it through with `--keystream`.
-- iPad install procedure is identical to `encrypt`: create a fresh empty world on the iPad NetEase client to claim a slot, then replace its directory contents with `<save>_netease/`.
+- iPad install procedure is identical to `encrypt`: create a fresh empty world on the iPad NetEase client to claim a slot (this creates a directory in iOS Files), then replace that directory's contents with `<save>_netease/`'s contents, and open the slot from the NetEase client.
 - **Requires .venv Python** (the encrypt step needs amulet-leveldb to patch `~local_player`). Also requires Chunker JAR at `~/.local/share/mcce/chunker-cli-*.jar` — see [Setup](#setup-one-time).
 
 ## What's Preserved vs What's Lost
